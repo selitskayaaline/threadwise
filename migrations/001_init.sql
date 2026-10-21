@@ -1,0 +1,9 @@
+CREATE EXTENSION IF NOT EXISTS vector;
+
+CREATE TABLE IF NOT EXISTS messages (
+    id      INTEGER PRIMARY KEY,
+    channel TEXT NOT NULL,
+    author  TEXT NOT NULL,
+    ts      TIMESTAMPTZ NOT NULL,
+    text    TEXT NOT NULL
+);
