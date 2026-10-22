@@ -14,12 +14,13 @@ Go service for RAG (retrieval-augmented generation) search over chat messages.
 
 ## Structure
 
-- `cmd/threadwise` — CLI entry point (`load`, `embed`, `search`)
+- `cmd/threadwise` — CLI entry point (`load`, `embed`, `search`, `eval`)
 - `internal/config` — environment config; `OLLAMA_URL` and `EMBED_MODEL` are checked only by commands that need them
 - `internal/store` — Postgres access: message upsert, embedding read/write
 - `internal/ollama` — Ollama HTTP client; retries on network errors and 5xx
-- `internal/search` — `Retriever` and `Embedder` interfaces; `Vector` implementation (embed query, nearest messages by pgvector cosine distance)
-- `migrations/` — SQL migrations
+- `internal/search` — `Retriever` and `Embedder` interfaces; `Vector` implementation (embed query, nearest messages by pgvector cosine distance); `FTS` implementation (full-text search by words, Russian config, query words combined with OR, ranked by `ts_rank`)
+- `internal/eval` — question loading, hit@k / MRR metrics (pure function), Markdown report
+- `migrations/` — SQL migrations (`003_fts.sql` adds the `tsv` column and index for full-text search)
 - `data/` — `messages.json` (synthetic chat messages), `questions.json` (test questions)
 - `docs/` — documentation
 
@@ -28,8 +29,10 @@ Go service for RAG (retrieval-augmented generation) search over chat messages.
 - `make test` — run all tests
 - `make load` — load `data/messages.json` into the database
 - `make embed` — compute embeddings for messages that have none
+- `make eval` — compare search methods on `data/questions.json` (hit@k, MRR@k, misses)
 - `make test-db` — apply all `migrations/*.sql` to the `threadwise_test` database
-- `threadwise search [-k N] "question"` — print the N nearest messages (default 5); flags go before the question
+- `threadwise search [-k N] [-method vector|fts] "question"` — print the N best messages (default 5, method `vector`); flags go before the question
+- `threadwise eval [-k N] [-methods fts,vector] [-file path]` — questions without `gold_ids` are skipped; Ollama is required only if `vector` is among the methods
 
 ## Conventions
 

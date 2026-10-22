@@ -10,8 +10,9 @@ import (
 	"github.com/selitskayaaline/threadwise/internal/store"
 )
 
-// Result is a message found by a Retriever. Score is the cosine distance to
-// the query: the smaller, the closer.
+// Result is a message found by a Retriever. Score depends on the Retriever:
+// for Vector it is the cosine distance (the smaller, the closer), for FTS it
+// is ts_rank (the larger, the better). Results come best first.
 type Result struct {
 	ID      int
 	Channel string

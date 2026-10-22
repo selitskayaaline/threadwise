@@ -35,7 +35,7 @@ internal/
   store/             # planned
   ollama/            # planned
   search/            # planned
-  eval/              # planned
+  eval/
   rag/               # planned
 ```
 
