@@ -6,11 +6,13 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/selitskayaaline/threadwise/internal/config"
+	"github.com/selitskayaaline/threadwise/internal/eval"
 	"github.com/selitskayaaline/threadwise/internal/ollama"
 	"github.com/selitskayaaline/threadwise/internal/search"
 	"github.com/selitskayaaline/threadwise/internal/store"
@@ -29,6 +31,8 @@ func main() {
 		cmdEmbed(os.Args[2:])
 	case "search":
 		cmdSearch(os.Args[2:])
+	case "eval":
+		cmdEval(os.Args[2:])
 	default:
 		usage()
 		os.Exit(2)
@@ -41,6 +45,7 @@ func usage() {
 	fmt.Fprintln(os.Stderr, "  load    load messages from a JSON file into the database")
 	fmt.Fprintln(os.Stderr, "  embed   compute embeddings for messages that have none")
 	fmt.Fprintln(os.Stderr, "  search  find the messages closest to a question")
+	fmt.Fprintln(os.Stderr, "  eval    compare search methods on the test questions (hit@k, MRR)")
 }
 
 func cmdLoad(args []string) {
@@ -207,4 +212,87 @@ func cmdSearch(args []string) {
 		fmt.Printf("%d\t%s\t%s\t%s\t%.3f\t%s\n",
 			r.ID, r.Channel, r.Author, r.TS.UTC().Format(time.RFC3339), r.Score, r.Text)
 	}
+}
+
+func cmdEval(args []string) {
+	fs := flag.NewFlagSet("eval", flag.ExitOnError)
+	k := fs.Int("k", 5, "number of messages to retrieve per question")
+	methods := fs.String("methods", "fts,vector", "comma-separated search methods: fts, vector")
+	file := fs.String("file", "data/questions.json", "path to the questions JSON file")
+	fs.Parse(args)
+
+	if *k < 1 {
+		fmt.Fprintln(os.Stderr, "threadwise eval: -k must be at least 1")
+		os.Exit(1)
+	}
+
+	var names []string
+	seen := map[string]bool{}
+	needVector := false
+	for _, name := range strings.Split(*methods, ",") {
+		name = strings.TrimSpace(name)
+		if name != "fts" && name != "vector" {
+			fmt.Fprintf(os.Stderr, "threadwise eval: unknown method %q in -methods (want fts or vector)\n", name)
+			os.Exit(2)
+		}
+		if seen[name] {
+			fmt.Fprintf(os.Stderr, "threadwise eval: method %q is listed twice in -methods\n", name)
+			os.Exit(2)
+		}
+		seen[name] = true
+		names = append(names, name)
+		needVector = needVector || name == "vector"
+	}
+
+	cfg, err := config.Load()
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "threadwise eval:", err)
+		os.Exit(1)
+	}
+	if needVector {
+		if err := cfg.RequireOllama(); err != nil {
+			fmt.Fprintln(os.Stderr, "threadwise eval:", err)
+			os.Exit(1)
+		}
+	}
+
+	data, err := os.ReadFile(*file)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "threadwise eval:", err)
+		os.Exit(1)
+	}
+	all, err := eval.LoadQuestions(data)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "threadwise eval:", err)
+		os.Exit(1)
+	}
+	qs, skipped := eval.SplitAnswerable(all)
+
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
+	defer stop()
+
+	pool, err := pgxpool.New(ctx, cfg.DatabaseURL)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "threadwise eval:", err)
+		os.Exit(1)
+	}
+	defer pool.Close()
+
+	var results []eval.MethodResult
+	for _, name := range names {
+		var retriever search.Retriever
+		if name == "fts" {
+			retriever = search.NewFTS(pool)
+		} else {
+			retriever = search.NewVector(pool, ollama.New(cfg.OllamaURL, cfg.EmbedModel))
+		}
+		m, misses, err := eval.Run(ctx, retriever, qs, *k)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "threadwise eval: method %s: %v\n", name, err)
+			os.Exit(1)
+		}
+		results = append(results, eval.MethodResult{Method: name, Metrics: m, Misses: misses})
+	}
+
+	eval.WriteReport(os.Stdout, *k, skipped, results)
 }
