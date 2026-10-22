@@ -14,10 +14,11 @@ Go service for RAG (retrieval-augmented generation) search over chat messages.
 
 ## Structure
 
-- `cmd/threadwise` — CLI entry point (`load`, `embed`)
+- `cmd/threadwise` — CLI entry point (`load`, `embed`, `search`)
 - `internal/config` — environment config; `OLLAMA_URL` and `EMBED_MODEL` are checked only by commands that need them
 - `internal/store` — Postgres access: message upsert, embedding read/write
 - `internal/ollama` — Ollama HTTP client; retries on network errors and 5xx
+- `internal/search` — `Retriever` and `Embedder` interfaces; `Vector` implementation (embed query, nearest messages by pgvector cosine distance)
 - `migrations/` — SQL migrations
 - `data/` — `messages.json` (synthetic chat messages), `questions.json` (test questions)
 - `docs/` — documentation
@@ -27,12 +28,15 @@ Go service for RAG (retrieval-augmented generation) search over chat messages.
 - `make test` — run all tests
 - `make load` — load `data/messages.json` into the database
 - `make embed` — compute embeddings for messages that have none
+- `make test-db` — apply all `migrations/*.sql` to the `threadwise_test` database
+- `threadwise search [-k N] "question"` — print the N nearest messages (default 5); flags go before the question
 
 ## Conventions
 
 - Format Go code with `gofmt`
 - Wrap errors with context (`fmt.Errorf("...: %w", err)`)
 - Parameterized SQL only, never string-concatenated queries
+- Integration tests use only the `threadwise_test` database and delete only their own rows
 - Conventional Commits for commit messages
 
 ## Key decisions
