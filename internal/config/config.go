@@ -10,6 +10,7 @@ type Config struct {
 	DatabaseURL string
 	OllamaURL   string
 	EmbedModel  string
+	ChatModel   string
 }
 
 // Load reads the configuration from the environment. Only DATABASE_URL is
@@ -23,6 +24,7 @@ func Load() (Config, error) {
 		DatabaseURL: databaseURL,
 		OllamaURL:   os.Getenv("OLLAMA_URL"),
 		EmbedModel:  os.Getenv("EMBED_MODEL"),
+		ChatModel:   os.Getenv("CHAT_MODEL"),
 	}, nil
 }
 
@@ -34,6 +36,21 @@ func (c Config) RequireOllama() error {
 	}
 	if c.EmbedModel == "" {
 		missing = append(missing, "EMBED_MODEL")
+	}
+	if len(missing) > 0 {
+		return fmt.Errorf("missing required environment variable(s) %s", strings.Join(missing, ", "))
+	}
+	return nil
+}
+
+// RequireChat checks the settings needed by commands that generate answers.
+func (c Config) RequireChat() error {
+	var missing []string
+	if c.OllamaURL == "" {
+		missing = append(missing, "OLLAMA_URL")
+	}
+	if c.ChatModel == "" {
+		missing = append(missing, "CHAT_MODEL")
 	}
 	if len(missing) > 0 {
 		return fmt.Errorf("missing required environment variable(s) %s", strings.Join(missing, ", "))
