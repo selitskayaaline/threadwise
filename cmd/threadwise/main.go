@@ -12,6 +12,7 @@ import (
 
 	"github.com/selitskayaaline/threadwise/internal/config"
 	"github.com/selitskayaaline/threadwise/internal/ollama"
+	"github.com/selitskayaaline/threadwise/internal/search"
 	"github.com/selitskayaaline/threadwise/internal/store"
 )
 
@@ -26,6 +27,8 @@ func main() {
 		cmdLoad(os.Args[2:])
 	case "embed":
 		cmdEmbed(os.Args[2:])
+	case "search":
+		cmdSearch(os.Args[2:])
 	default:
 		usage()
 		os.Exit(2)
@@ -37,6 +40,7 @@ func usage() {
 	fmt.Fprintln(os.Stderr, "commands:")
 	fmt.Fprintln(os.Stderr, "  load    load messages from a JSON file into the database")
 	fmt.Fprintln(os.Stderr, "  embed   compute embeddings for messages that have none")
+	fmt.Fprintln(os.Stderr, "  search  find the messages closest to a question")
 }
 
 func cmdLoad(args []string) {
@@ -146,4 +150,51 @@ func cmdEmbed(args []string) {
 	}
 
 	fmt.Printf("embedded %d messages\n", total)
+}
+
+func cmdSearch(args []string) {
+	fs := flag.NewFlagSet("search", flag.ExitOnError)
+	k := fs.Int("k", 5, "number of messages to return")
+	fs.Parse(args)
+
+	if fs.NArg() != 1 || fs.Arg(0) == "" {
+		fmt.Fprintln(os.Stderr, "usage: threadwise search [-k N] \"question\"")
+		os.Exit(2)
+	}
+	if *k < 1 {
+		fmt.Fprintln(os.Stderr, "threadwise search: -k must be at least 1")
+		os.Exit(1)
+	}
+
+	cfg, err := config.Load()
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "threadwise search:", err)
+		os.Exit(1)
+	}
+	if err := cfg.RequireOllama(); err != nil {
+		fmt.Fprintln(os.Stderr, "threadwise search:", err)
+		os.Exit(1)
+	}
+
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
+	defer stop()
+
+	pool, err := pgxpool.New(ctx, cfg.DatabaseURL)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "threadwise search:", err)
+		os.Exit(1)
+	}
+	defer pool.Close()
+
+	retriever := search.NewVector(pool, ollama.New(cfg.OllamaURL, cfg.EmbedModel))
+	results, err := retriever.Search(ctx, fs.Arg(0), *k)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "threadwise search:", err)
+		os.Exit(1)
+	}
+
+	for _, r := range results {
+		fmt.Printf("%d\t%s\t%s\t%s\t%.3f\t%s\n",
+			r.ID, r.Channel, r.Author, r.TS.UTC().Format(time.RFC3339), r.Score, r.Text)
+	}
 }
