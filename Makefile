@@ -6,3 +6,6 @@ test:
 
 load:
 	go run ./cmd/threadwise load
+
+embed:
+	go run ./cmd/threadwise embed

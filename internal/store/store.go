@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -86,4 +88,95 @@ func UpsertMessages(ctx context.Context, pool *pgxpool.Pool, msgs []Message) err
 		return fmt.Errorf("commit transaction: %w", err)
 	}
 	return nil
+}
+
+// EmbeddingDim is the dimension of the messages.embedding column.
+const EmbeddingDim = 1024
+
+// FormatVector renders v in the pgvector text format, e.g. "[0.1,0.2]".
+func FormatVector(v []float32) string {
+	var b strings.Builder
+	b.WriteByte('[')
+	for i, x := range v {
+		if i > 0 {
+			b.WriteByte(',')
+		}
+		b.WriteString(strconv.FormatFloat(float64(x), 'g', -1, 32))
+	}
+	b.WriteByte(']')
+	return b.String()
+}
+
+func checkDim(id int, v []float32) error {
+	if len(v) != EmbeddingDim {
+		return fmt.Errorf("message id=%d: модель вернула %d, колонка ждёт %d", id, len(v), EmbeddingDim)
+	}
+	return nil
+}
+
+// PendingMessages returns up to limit messages that have no embedding yet.
+func PendingMessages(ctx context.Context, pool *pgxpool.Pool, limit int) ([]Message, error) {
+	rows, err := pool.Query(ctx, `
+		SELECT id, channel, author, ts, text
+		FROM messages
+		WHERE embedding IS NULL
+		ORDER BY id
+		LIMIT $1
+	`, limit)
+	if err != nil {
+		return nil, fmt.Errorf("query messages without embedding: %w", err)
+	}
+	defer rows.Close()
+
+	var msgs []Message
+	for rows.Next() {
+		var m Message
+		if err := rows.Scan(&m.ID, &m.Channel, &m.Author, &m.Ts, &m.Text); err != nil {
+			return nil, fmt.Errorf("scan message: %w", err)
+		}
+		msgs = append(msgs, m)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("read messages: %w", err)
+	}
+	return msgs, nil
+}
+
+// SetEmbeddings stores vecs[i] for msgs[i] and returns how many rows were
+// updated. Every vector is validated before anything is written. A row is
+// skipped if its text changed since msgs was read (the vector would be stale),
+// so it stays NULL and is picked up by the next run.
+func SetEmbeddings(ctx context.Context, pool *pgxpool.Pool, msgs []Message, vecs [][]float32) (int, error) {
+	if len(msgs) != len(vecs) {
+		return 0, fmt.Errorf("got %d vectors for %d messages", len(vecs), len(msgs))
+	}
+	for i, m := range msgs {
+		if err := checkDim(m.ID, vecs[i]); err != nil {
+			return 0, err
+		}
+	}
+
+	tx, err := pool.Begin(ctx)
+	if err != nil {
+		return 0, fmt.Errorf("begin transaction: %w", err)
+	}
+	defer tx.Rollback(ctx)
+
+	const stmt = `
+		UPDATE messages SET embedding = $1::vector
+		WHERE id = $2 AND text = $3 AND embedding IS NULL
+	`
+	updated := 0
+	for i, m := range msgs {
+		tag, err := tx.Exec(ctx, stmt, FormatVector(vecs[i]), m.ID, m.Text)
+		if err != nil {
+			return 0, fmt.Errorf("set embedding for message id=%d: %w", m.ID, err)
+		}
+		updated += int(tag.RowsAffected())
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return 0, fmt.Errorf("commit transaction: %w", err)
+	}
+	return updated, nil
 }
