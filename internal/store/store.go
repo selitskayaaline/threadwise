@@ -61,14 +61,20 @@ func UpsertMessages(ctx context.Context, pool *pgxpool.Pool, msgs []Message) err
 	}
 	defer tx.Rollback(ctx)
 
+	// embedding is derived from text, so a text change invalidates it; an
+	// unchanged text keeps the previously computed embedding.
 	const stmt = `
 		INSERT INTO messages (id, channel, author, ts, text)
 		VALUES ($1, $2, $3, $4, $5)
 		ON CONFLICT (id) DO UPDATE SET
-			channel = excluded.channel,
-			author  = excluded.author,
-			ts      = excluded.ts,
-			text    = excluded.text
+			channel   = excluded.channel,
+			author    = excluded.author,
+			ts        = excluded.ts,
+			text      = excluded.text,
+			embedding = CASE
+				WHEN messages.text IS DISTINCT FROM excluded.text THEN NULL
+				ELSE messages.embedding
+			END
 	`
 	for _, m := range msgs {
 		if _, err := tx.Exec(ctx, stmt, m.ID, m.Channel, m.Author, m.Ts, m.Text); err != nil {
