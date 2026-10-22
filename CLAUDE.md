@@ -7,20 +7,26 @@ Go service for RAG (retrieval-augmented generation) search over chat messages.
 ## Stack
 
 - Go
-- PostgreSQL 17 + pgvector, Docker container `pgv`, `localhost:5433`
+- PostgreSQL 17 + pgvector, Docker container `pgv`
 - Ollama on a separate machine; URL from `OLLAMA_URL` in `.env`
 - Embeddings: `bge-m3`
 - Answers: `gemma3:4b`
 
 ## Structure
 
-- `data/messages.json` — synthetic chat messages
-- `data/questions.json` — test questions
-- No Go module or source code yet; project is in initial setup
+- `cmd/threadwise` — CLI entry point (`load`, `embed`)
+- `internal/config` — environment config; `OLLAMA_URL` and `EMBED_MODEL` are checked only by commands that need them
+- `internal/store` — Postgres access: message upsert, embedding read/write
+- `internal/ollama` — Ollama HTTP client; retries on network errors and 5xx
+- `migrations/` — SQL migrations
+- `data/` — `messages.json` (synthetic chat messages), `questions.json` (test questions)
+- `docs/` — documentation
 
 ## Commands
 
-None yet — no `go.mod`, Makefile, or Docker Compose file exists in the repo.
+- `make test` — run all tests
+- `make load` — load `data/messages.json` into the database
+- `make embed` — compute embeddings for messages that have none
 
 ## Conventions
 
@@ -31,9 +37,12 @@ None yet — no `go.mod`, Makefile, or Docker Compose file exists in the repo.
 
 ## Key decisions
 
-- Vector storage: pgvector inside Postgres 17, Docker container `pgv`, port 5433
+- Vector storage: pgvector inside Postgres 17, Docker container `pgv`
 - Ollama is remote, accessed only via `OLLAMA_URL` in `.env`
 - Embeddings model `bge-m3`, answer model `gemma3:4b`
+- Vectors are passed to SQL as text `'[...]'` with a `$1::vector` cast; no pgvector-go
+- Timestamps in `messages.json` have no time zone and are read as UTC
+- Changing `EMBED_MODEL` requires a new migration and re-embedding all vectors
 
 ## Do NOT
 
