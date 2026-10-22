@@ -14,6 +14,7 @@ import (
 	"github.com/selitskayaaline/threadwise/internal/config"
 	"github.com/selitskayaaline/threadwise/internal/eval"
 	"github.com/selitskayaaline/threadwise/internal/ollama"
+	"github.com/selitskayaaline/threadwise/internal/rag"
 	"github.com/selitskayaaline/threadwise/internal/search"
 	"github.com/selitskayaaline/threadwise/internal/store"
 )
@@ -31,6 +32,8 @@ func main() {
 		cmdEmbed(os.Args[2:])
 	case "search":
 		cmdSearch(os.Args[2:])
+	case "ask":
+		cmdAsk(os.Args[2:])
 	case "eval":
 		cmdEval(os.Args[2:])
 	default:
@@ -45,6 +48,7 @@ func usage() {
 	fmt.Fprintln(os.Stderr, "  load    load messages from a JSON file into the database")
 	fmt.Fprintln(os.Stderr, "  embed   compute embeddings for messages that have none")
 	fmt.Fprintln(os.Stderr, "  search  find the messages closest to a question")
+	fmt.Fprintln(os.Stderr, "  ask     answer a question from the found messages, with sources")
 	fmt.Fprintln(os.Stderr, "  eval    compare search methods on the test questions (hit@k, MRR)")
 }
 
@@ -211,6 +215,85 @@ func cmdSearch(args []string) {
 	for _, r := range results {
 		fmt.Printf("%d\t%s\t%s\t%s\t%.3f\t%s\n",
 			r.ID, r.Channel, r.Author, r.TS.UTC().Format(time.RFC3339), r.Score, r.Text)
+	}
+}
+
+const askTemperature = 0.1
+
+func cmdAsk(args []string) {
+	fs := flag.NewFlagSet("ask", flag.ExitOnError)
+	k := fs.Int("k", 5, "number of messages to give the model")
+	method := fs.String("method", "vector", "search method: vector or fts")
+	fs.Parse(args)
+
+	if fs.NArg() != 1 || fs.Arg(0) == "" {
+		fmt.Fprintln(os.Stderr, "usage: threadwise ask [-k N] [-method vector|fts] \"question\"")
+		os.Exit(2)
+	}
+	if *k < 1 {
+		fmt.Fprintln(os.Stderr, "threadwise ask: -k must be at least 1")
+		os.Exit(1)
+	}
+	if *method != "vector" && *method != "fts" {
+		fmt.Fprintf(os.Stderr, "threadwise ask: unknown -method %q (want vector or fts)\n", *method)
+		os.Exit(2)
+	}
+
+	cfg, err := config.Load()
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "threadwise ask:", err)
+		os.Exit(1)
+	}
+	if err := cfg.RequireChat(); err != nil {
+		fmt.Fprintln(os.Stderr, "threadwise ask:", err)
+		os.Exit(1)
+	}
+	if *method == "vector" {
+		if err := cfg.RequireOllama(); err != nil {
+			fmt.Fprintln(os.Stderr, "threadwise ask:", err)
+			os.Exit(1)
+		}
+	}
+
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
+	defer stop()
+
+	pool, err := pgxpool.New(ctx, cfg.DatabaseURL)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "threadwise ask:", err)
+		os.Exit(1)
+	}
+	defer pool.Close()
+
+	var retriever search.Retriever
+	if *method == "fts" {
+		retriever = search.NewFTS(pool)
+	} else {
+		retriever = search.NewVector(pool, ollama.New(cfg.OllamaURL, cfg.EmbedModel))
+	}
+
+	svc := &rag.Service{
+		Retriever:   retriever,
+		Chat:        ollama.New(cfg.OllamaURL, cfg.ChatModel),
+		K:           *k,
+		Temperature: askTemperature,
+	}
+	res, err := svc.Answer(ctx, fs.Arg(0))
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "threadwise ask:", err)
+		os.Exit(1)
+	}
+
+	fmt.Println(res.Text)
+	if len(res.Cited) > 0 {
+		fmt.Println()
+		fmt.Println("Источники:")
+		for _, r := range res.Cited {
+			fmt.Printf("[%d] %s, %s\n", r.ID, r.Author, rag.FormatTime(r))
+		}
+	}
+	for _, id := range res.Unknown {
+		fmt.Fprintf(os.Stderr, "предупреждение: модель сослалась на несуществующее сообщение [%d]\n", id)
 	}
 }
 

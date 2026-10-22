@@ -14,15 +14,16 @@ Go service for RAG (retrieval-augmented generation) search over chat messages.
 
 ## Structure
 
-- `cmd/threadwise` — CLI entry point (`load`, `embed`, `search`, `eval`)
-- `internal/config` — environment config; `OLLAMA_URL` and `EMBED_MODEL` are checked only by commands that need them
+- `cmd/threadwise` — CLI entry point (`load`, `embed`, `search`, `ask`, `eval`)
+- `internal/config` — environment config; `OLLAMA_URL`, `EMBED_MODEL` and `CHAT_MODEL` are checked only by commands that need them (`RequireOllama`, `RequireChat`)
 - `internal/store` — Postgres access: message upsert, embedding read/write
-- `internal/ollama` — Ollama HTTP client; retries on network errors and 5xx
+- `internal/ollama` — Ollama HTTP client (`Embed`, `Chat`); retries on network errors and 5xx; `Chat` has a longer timeout
 - `internal/search` — `Retriever` and `Embedder` interfaces; `Vector` implementation (embed query, nearest messages by pgvector cosine distance); `FTS` implementation (full-text search by words, Russian config, query words combined with OR, ranked by `ts_rank`)
+- `internal/rag` — `BuildPrompt` (system prompt from `docs/prompt.md`, messages sorted by time inside `<messages>`), `ParseCitations`, `Service.Answer` (search → prompt → chat → citation check)
 - `internal/eval` — question loading, hit@k / MRR metrics (pure function), Markdown report
 - `migrations/` — SQL migrations (`003_fts.sql` adds the `tsv` column and index for full-text search)
 - `data/` — `messages.json` (synthetic chat messages), `questions.json` (test questions)
-- `docs/` — documentation
+- `docs/` — documentation; `prompt.md` is the system prompt for `ask` (kept in sync with `internal/rag` by a test)
 
 ## Commands
 
@@ -32,6 +33,7 @@ Go service for RAG (retrieval-augmented generation) search over chat messages.
 - `make eval` — compare search methods on `data/questions.json` (hit@k, MRR@k, misses)
 - `make test-db` — apply all `migrations/*.sql` to the `threadwise_test` database
 - `threadwise search [-k N] [-method vector|fts] "question"` — print the N best messages (default 5, method `vector`); flags go before the question
+- `threadwise ask [-k N] [-method vector|fts] "question"` — answer from the found messages with `[id]` citations, then print `Источники:` (only cited messages); warns about citations of messages that were not found; temperature 0.1; needs `CHAT_MODEL`; flags go before the question
 - `threadwise eval [-k N] [-methods fts,vector] [-file path]` — questions without `gold_ids` are skipped; Ollama is required only if `vector` is among the methods
 
 ## Conventions
