@@ -155,10 +155,11 @@ func cmdEmbed(args []string) {
 func cmdSearch(args []string) {
 	fs := flag.NewFlagSet("search", flag.ExitOnError)
 	k := fs.Int("k", 5, "number of messages to return")
+	method := fs.String("method", "vector", "search method: vector or fts")
 	fs.Parse(args)
 
 	if fs.NArg() != 1 || fs.Arg(0) == "" {
-		fmt.Fprintln(os.Stderr, "usage: threadwise search [-k N] \"question\"")
+		fmt.Fprintln(os.Stderr, "usage: threadwise search [-k N] [-method vector|fts] \"question\"")
 		os.Exit(2)
 	}
 	if *k < 1 {
@@ -168,10 +169,6 @@ func cmdSearch(args []string) {
 
 	cfg, err := config.Load()
 	if err != nil {
-		fmt.Fprintln(os.Stderr, "threadwise search:", err)
-		os.Exit(1)
-	}
-	if err := cfg.RequireOllama(); err != nil {
 		fmt.Fprintln(os.Stderr, "threadwise search:", err)
 		os.Exit(1)
 	}
@@ -186,7 +183,20 @@ func cmdSearch(args []string) {
 	}
 	defer pool.Close()
 
-	retriever := search.NewVector(pool, ollama.New(cfg.OllamaURL, cfg.EmbedModel))
+	var retriever search.Retriever
+	switch *method {
+	case "fts":
+		retriever = search.NewFTS(pool)
+	case "vector":
+		if err := cfg.RequireOllama(); err != nil {
+			fmt.Fprintln(os.Stderr, "threadwise search:", err)
+			os.Exit(1)
+		}
+		retriever = search.NewVector(pool, ollama.New(cfg.OllamaURL, cfg.EmbedModel))
+	default:
+		fmt.Fprintf(os.Stderr, "threadwise search: unknown -method %q (want vector or fts)\n", *method)
+		os.Exit(2)
+	}
 	results, err := retriever.Search(ctx, fs.Arg(0), *k)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "threadwise search:", err)
