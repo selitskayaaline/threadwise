@@ -63,7 +63,7 @@ func TestVectorSearch(t *testing.T) {
 	v := NewVector(pool, fakeEmbedder{vec: q})
 
 	for _, k := range []int{1, 2, 3} {
-		res, err := v.Search(ctx, "question", k)
+		res, err := v.Search(ctx, Query{Text: "question", K: k})
 		if err != nil {
 			t.Fatalf("Search k=%d: %v", k, err)
 		}

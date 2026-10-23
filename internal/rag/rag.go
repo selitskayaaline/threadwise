@@ -99,7 +99,7 @@ type Result struct {
 
 // Answer finds messages for the question, asks the chat model and checks its citations.
 func (s *Service) Answer(ctx context.Context, question string) (Result, error) {
-	found, err := s.Retriever.Search(ctx, question, s.K)
+	found, err := s.Retriever.Search(ctx, search.Query{Text: question, K: s.K})
 	if err != nil {
 		return Result{}, fmt.Errorf("search messages: %w", err)
 	}

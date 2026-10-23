@@ -100,7 +100,7 @@ type fakeRetriever struct {
 	err error
 }
 
-func (f fakeRetriever) Search(ctx context.Context, q string, k int) ([]search.Result, error) {
+func (f fakeRetriever) Search(ctx context.Context, q search.Query) ([]search.Result, error) {
 	return f.res, f.err
 }
 

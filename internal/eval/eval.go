@@ -87,7 +87,7 @@ func Run(ctx context.Context, r search.Retriever, qs []Question, k int) (Metrics
 	hits := 0
 	sumRR := 0.0
 	for _, q := range qs {
-		res, err := r.Search(ctx, q.Question, k)
+		res, err := r.Search(ctx, search.Query{Text: q.Question, K: k})
 		if err != nil {
 			return Metrics{}, nil, fmt.Errorf("question %d: %w", q.ID, err)
 		}

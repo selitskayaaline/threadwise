@@ -206,7 +206,7 @@ func cmdSearch(args []string) {
 		fmt.Fprintf(os.Stderr, "threadwise search: unknown -method %q (want vector or fts)\n", *method)
 		os.Exit(2)
 	}
-	results, err := retriever.Search(ctx, fs.Arg(0), *k)
+	results, err := retriever.Search(ctx, search.Query{Text: fs.Arg(0), K: *k})
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "threadwise search:", err)
 		os.Exit(1)

@@ -22,9 +22,16 @@ type Result struct {
 	Score   float64
 }
 
-// Retriever finds the k messages most relevant to query.
+// Query is a search request.
+type Query struct {
+	Text     string
+	K        int
+	Channels []string // empty means no channel filter
+}
+
+// Retriever finds the q.K messages most relevant to q.Text.
 type Retriever interface {
-	Search(ctx context.Context, query string, k int) ([]Result, error)
+	Search(ctx context.Context, q Query) ([]Result, error)
 }
 
 // Embedder turns texts into vectors; *ollama.Client satisfies it.
@@ -49,12 +56,12 @@ WHERE embedding IS NOT NULL
 ORDER BY embedding <=> $1::vector
 LIMIT $2`
 
-func (v *Vector) Search(ctx context.Context, query string, k int) ([]Result, error) {
-	if k < 1 {
-		return nil, fmt.Errorf("search: k must be at least 1, got %d", k)
+func (v *Vector) Search(ctx context.Context, q Query) ([]Result, error) {
+	if q.K < 1 {
+		return nil, fmt.Errorf("search: k must be at least 1, got %d", q.K)
 	}
 
-	vecs, err := v.emb.Embed(ctx, []string{query})
+	vecs, err := v.emb.Embed(ctx, []string{q.Text})
 	if err != nil {
 		return nil, fmt.Errorf("embed query: %w", err)
 	}
@@ -65,7 +72,7 @@ func (v *Vector) Search(ctx context.Context, query string, k int) ([]Result, err
 		return nil, fmt.Errorf("embed query: got dimension %d, want %d", len(vecs[0]), store.EmbeddingDim)
 	}
 
-	rows, err := v.pool.Query(ctx, searchSQL, store.FormatVector(vecs[0]), k)
+	rows, err := v.pool.Query(ctx, searchSQL, store.FormatVector(vecs[0]), q.K)
 	if err != nil {
 		return nil, fmt.Errorf("query nearest messages: %w", err)
 	}

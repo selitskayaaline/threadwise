@@ -60,12 +60,12 @@ type stubRetriever struct {
 	err     error
 }
 
-func (s stubRetriever) Search(_ context.Context, query string, k int) ([]search.Result, error) {
+func (s stubRetriever) Search(_ context.Context, q search.Query) ([]search.Result, error) {
 	if s.err != nil {
 		return nil, s.err
 	}
 	var res []search.Result
-	for _, id := range s.byQuery[query] {
+	for _, id := range s.byQuery[q.Text] {
 		res = append(res, search.Result{ID: id})
 	}
 	return res, nil
