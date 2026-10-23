@@ -26,16 +26,20 @@ WITH q AS (
 )
 SELECT id, channel, author, ts, text, ts_rank(tsv, q.query)
 FROM messages, q
-WHERE tsv @@ q.query
+WHERE tsv @@ q.query AND channel = ANY($3)
 ORDER BY ts_rank(tsv, q.query) DESC, id
 LIMIT $2`
 
-func (f *FTS) Search(ctx context.Context, query string, k int) ([]Result, error) {
-	if k < 1 {
-		return nil, fmt.Errorf("search: k must be at least 1, got %d", k)
+func (f *FTS) Search(ctx context.Context, q Query) ([]Result, error) {
+	if q.K < 1 {
+		return nil, fmt.Errorf("search: k must be at least 1, got %d", q.K)
 	}
 
-	rows, err := f.pool.Query(ctx, ftsSQL, query, k)
+	if len(q.Channels) == 0 {
+		return nil, nil
+	}
+
+	rows, err := f.pool.Query(ctx, ftsSQL, q.Text, q.K, q.Channels)
 	if err != nil {
 		return nil, fmt.Errorf("query full-text messages: %w", err)
 	}

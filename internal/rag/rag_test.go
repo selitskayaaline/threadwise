@@ -100,7 +100,7 @@ type fakeRetriever struct {
 	err error
 }
 
-func (f fakeRetriever) Search(ctx context.Context, q string, k int) ([]search.Result, error) {
+func (f fakeRetriever) Search(ctx context.Context, q search.Query) ([]search.Result, error) {
 	return f.res, f.err
 }
 
@@ -181,5 +181,27 @@ func TestAnswerRefusalDropsCitations(t *testing.T) {
 				t.Errorf("Cited = %+v, Unknown = %v, want both empty", res.Cited, res.Unknown)
 			}
 		})
+	}
+}
+
+type recordingRetriever struct {
+	got *search.Query
+}
+
+func (r recordingRetriever) Search(ctx context.Context, q search.Query) ([]search.Result, error) {
+	*r.got = q
+	return nil, nil
+}
+
+func TestAnswerPassesChannelsToRetriever(t *testing.T) {
+	var got search.Query
+	s := &Service{Retriever: recordingRetriever{got: &got}, Chat: &fakeChat{}, K: 4, Channels: []string{"general"}}
+
+	if _, err := s.Answer(context.Background(), "когда релиз?"); err != nil {
+		t.Fatalf("Answer: %v", err)
+	}
+	want := search.Query{Text: "когда релиз?", K: 4, Channels: []string{"general"}}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("query = %+v, want %+v", got, want)
 	}
 }

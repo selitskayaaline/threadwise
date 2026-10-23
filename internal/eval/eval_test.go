@@ -60,12 +60,12 @@ type stubRetriever struct {
 	err     error
 }
 
-func (s stubRetriever) Search(_ context.Context, query string, k int) ([]search.Result, error) {
+func (s stubRetriever) Search(_ context.Context, q search.Query) ([]search.Result, error) {
 	if s.err != nil {
 		return nil, s.err
 	}
 	var res []search.Result
-	for _, id := range s.byQuery[query] {
+	for _, id := range s.byQuery[q.Text] {
 		res = append(res, search.Result{ID: id})
 	}
 	return res, nil
@@ -82,7 +82,7 @@ func TestRun(t *testing.T) {
 		"b": {1, 2, 20},
 		"c": {1, 2, 3},
 	}}
-	m, misses, err := Run(context.Background(), r, qs, 5)
+	m, misses, err := Run(context.Background(), r, qs, 5, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -93,7 +93,7 @@ func TestRun(t *testing.T) {
 		t.Errorf("misses = %+v", misses)
 	}
 
-	if _, _, err := Run(context.Background(), stubRetriever{err: errors.New("boom")}, qs, 5); err == nil {
+	if _, _, err := Run(context.Background(), stubRetriever{err: errors.New("boom")}, qs, 5, nil); err == nil {
 		t.Error("expected the search error")
 	}
 }

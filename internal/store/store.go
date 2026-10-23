@@ -180,3 +180,31 @@ func SetEmbeddings(ctx context.Context, pool *pgxpool.Pool, msgs []Message, vecs
 	}
 	return updated, nil
 }
+
+// AllowedChannels returns the channels the user may search, sorted by name.
+// An unknown user has no channels; that is an empty result, not an error.
+func AllowedChannels(ctx context.Context, pool *pgxpool.Pool, user string) ([]string, error) {
+	rows, err := pool.Query(ctx, `
+		SELECT channel
+		FROM channel_access
+		WHERE user_name = $1
+		ORDER BY channel
+	`, user)
+	if err != nil {
+		return nil, fmt.Errorf("query channels of user %q: %w", user, err)
+	}
+	defer rows.Close()
+
+	channels := []string{}
+	for rows.Next() {
+		var c string
+		if err := rows.Scan(&c); err != nil {
+			return nil, fmt.Errorf("scan channel: %w", err)
+		}
+		channels = append(channels, c)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("read channels: %w", err)
+	}
+	return channels, nil
+}

@@ -69,7 +69,7 @@ func TestFTSSearch(t *testing.T) {
 	}
 
 	t.Run("other word form", func(t *testing.T) {
-		res, err := f.Search(ctx, "готов ли план по релизу", 50)
+		res, err := f.Search(ctx, Query{Text: "готов ли план по релизу", K: 50, Channels: []string{"fts-test"}})
 		if err != nil {
 			t.Fatalf("Search: %v", err)
 		}
@@ -79,7 +79,7 @@ func TestFTSSearch(t *testing.T) {
 	})
 
 	t.Run("words are combined with OR", func(t *testing.T) {
-		res, err := f.Search(ctx, "релизу обед", 50)
+		res, err := f.Search(ctx, Query{Text: "релизу обед", K: 50, Channels: []string{"fts-test"}})
 		if err != nil {
 			t.Fatalf("Search: %v", err)
 		}
@@ -98,7 +98,7 @@ func TestFTSSearch(t *testing.T) {
 	})
 
 	t.Run("limit", func(t *testing.T) {
-		res, err := f.Search(ctx, "релизу обед сегодня", 1)
+		res, err := f.Search(ctx, Query{Text: "релизу обед сегодня", K: 1, Channels: []string{"fts-test"}})
 		if err != nil {
 			t.Fatalf("Search: %v", err)
 		}
@@ -108,7 +108,7 @@ func TestFTSSearch(t *testing.T) {
 	})
 
 	t.Run("stop words only", func(t *testing.T) {
-		res, err := f.Search(ctx, "и в на", 5)
+		res, err := f.Search(ctx, Query{Text: "и в на", K: 5, Channels: []string{"fts-test"}})
 		if err != nil {
 			t.Fatalf("Search: %v", err)
 		}
@@ -118,7 +118,7 @@ func TestFTSSearch(t *testing.T) {
 	})
 
 	t.Run("invalid k", func(t *testing.T) {
-		if _, err := f.Search(ctx, "релиз", 0); err == nil {
+		if _, err := f.Search(ctx, Query{Text: "релиз", K: 0, Channels: []string{"fts-test"}}); err == nil {
 			t.Error("k=0: expected an error")
 		}
 	})
