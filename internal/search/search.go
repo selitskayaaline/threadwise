@@ -26,10 +26,11 @@ type Result struct {
 type Query struct {
 	Text     string
 	K        int
-	Channels []string // empty means no channel filter
+	Channels []string // channels the caller may read; empty means no access
 }
 
-// Retriever finds the q.K messages most relevant to q.Text.
+// Retriever finds the q.K messages most relevant to q.Text among the messages
+// of q.Channels. With no channels it returns nothing.
 type Retriever interface {
 	Search(ctx context.Context, q Query) ([]Result, error)
 }
@@ -52,13 +53,17 @@ func NewVector(pool *pgxpool.Pool, emb Embedder) *Vector {
 const searchSQL = `
 SELECT id, channel, author, ts, text, embedding <=> $1::vector
 FROM messages
-WHERE embedding IS NOT NULL
+WHERE embedding IS NOT NULL AND channel = ANY($3)
 ORDER BY embedding <=> $1::vector
 LIMIT $2`
 
 func (v *Vector) Search(ctx context.Context, q Query) ([]Result, error) {
 	if q.K < 1 {
 		return nil, fmt.Errorf("search: k must be at least 1, got %d", q.K)
+	}
+
+	if len(q.Channels) == 0 {
+		return nil, nil
 	}
 
 	vecs, err := v.emb.Embed(ctx, []string{q.Text})
@@ -72,7 +77,7 @@ func (v *Vector) Search(ctx context.Context, q Query) ([]Result, error) {
 		return nil, fmt.Errorf("embed query: got dimension %d, want %d", len(vecs[0]), store.EmbeddingDim)
 	}
 
-	rows, err := v.pool.Query(ctx, searchSQL, store.FormatVector(vecs[0]), q.K)
+	rows, err := v.pool.Query(ctx, searchSQL, store.FormatVector(vecs[0]), q.K, q.Channels)
 	if err != nil {
 		return nil, fmt.Errorf("query nearest messages: %w", err)
 	}

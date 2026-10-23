@@ -165,10 +165,11 @@ func cmdSearch(args []string) {
 	fs := flag.NewFlagSet("search", flag.ExitOnError)
 	k := fs.Int("k", 5, "number of messages to return")
 	method := fs.String("method", "vector", "search method: vector or fts")
+	user := fs.String("user", defaultUser, "user whose channels are searched")
 	fs.Parse(args)
 
 	if fs.NArg() != 1 || fs.Arg(0) == "" {
-		fmt.Fprintln(os.Stderr, "usage: threadwise search [-k N] [-method vector|fts] \"question\"")
+		fmt.Fprintln(os.Stderr, "usage: threadwise search [-k N] [-method vector|fts] [-user NAME] \"question\"")
 		os.Exit(2)
 	}
 	if *k < 1 {
@@ -206,7 +207,12 @@ func cmdSearch(args []string) {
 		fmt.Fprintf(os.Stderr, "threadwise search: unknown -method %q (want vector or fts)\n", *method)
 		os.Exit(2)
 	}
-	results, err := retriever.Search(ctx, search.Query{Text: fs.Arg(0), K: *k})
+	channels, err := store.AllowedChannels(ctx, pool, *user)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "threadwise search:", err)
+		os.Exit(1)
+	}
+	results, err := retriever.Search(ctx, search.Query{Text: fs.Arg(0), K: *k, Channels: channels})
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "threadwise search:", err)
 		os.Exit(1)
@@ -220,14 +226,22 @@ func cmdSearch(args []string) {
 
 const askTemperature = 0.1
 
+// defaultUser is the user search and ask run as without -user; evalUser is the
+// user eval runs as.
+const (
+	defaultUser = "lead"
+	evalUser    = "lead"
+)
+
 func cmdAsk(args []string) {
 	fs := flag.NewFlagSet("ask", flag.ExitOnError)
 	k := fs.Int("k", 5, "number of messages to give the model")
 	method := fs.String("method", "vector", "search method: vector or fts")
+	user := fs.String("user", defaultUser, "user whose channels are searched")
 	fs.Parse(args)
 
 	if fs.NArg() != 1 || fs.Arg(0) == "" {
-		fmt.Fprintln(os.Stderr, "usage: threadwise ask [-k N] [-method vector|fts] \"question\"")
+		fmt.Fprintln(os.Stderr, "usage: threadwise ask [-k N] [-method vector|fts] [-user NAME] \"question\"")
 		os.Exit(2)
 	}
 	if *k < 1 {
@@ -272,10 +286,17 @@ func cmdAsk(args []string) {
 		retriever = search.NewVector(pool, ollama.New(cfg.OllamaURL, cfg.EmbedModel))
 	}
 
+	channels, err := store.AllowedChannels(ctx, pool, *user)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "threadwise ask:", err)
+		os.Exit(1)
+	}
+
 	svc := &rag.Service{
 		Retriever:   retriever,
 		Chat:        ollama.New(cfg.OllamaURL, cfg.ChatModel),
 		K:           *k,
+		Channels:    channels,
 		Temperature: askTemperature,
 	}
 	res, err := svc.Answer(ctx, fs.Arg(0))
@@ -361,6 +382,12 @@ func cmdEval(args []string) {
 	}
 	defer pool.Close()
 
+	channels, err := store.AllowedChannels(ctx, pool, evalUser)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "threadwise eval:", err)
+		os.Exit(1)
+	}
+
 	var results []eval.MethodResult
 	for _, name := range names {
 		var retriever search.Retriever
@@ -369,7 +396,7 @@ func cmdEval(args []string) {
 		} else {
 			retriever = search.NewVector(pool, ollama.New(cfg.OllamaURL, cfg.EmbedModel))
 		}
-		m, misses, err := eval.Run(ctx, retriever, qs, *k)
+		m, misses, err := eval.Run(ctx, retriever, qs, *k, channels)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "threadwise eval: method %s: %v\n", name, err)
 			os.Exit(1)

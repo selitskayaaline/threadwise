@@ -80,14 +80,14 @@ func Score(found, gold []int, k int) (hit bool, rr float64) {
 	return false, 0
 }
 
-// Run searches every question with r and computes hit@k and MRR@k.
-func Run(ctx context.Context, r search.Retriever, qs []Question, k int) (Metrics, []Miss, error) {
+// Run searches every question with r among channels and computes hit@k and MRR@k.
+func Run(ctx context.Context, r search.Retriever, qs []Question, k int, channels []string) (Metrics, []Miss, error) {
 	var m Metrics
 	var misses []Miss
 	hits := 0
 	sumRR := 0.0
 	for _, q := range qs {
-		res, err := r.Search(ctx, search.Query{Text: q.Question, K: k})
+		res, err := r.Search(ctx, search.Query{Text: q.Question, K: k, Channels: channels})
 		if err != nil {
 			return Metrics{}, nil, fmt.Errorf("question %d: %w", q.ID, err)
 		}

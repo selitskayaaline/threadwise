@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"os"
+	"reflect"
 	"testing"
 	"time"
 
@@ -55,4 +56,41 @@ func countRows(ctx context.Context, t *testing.T, pool *pgxpool.Pool) int {
 		t.Fatalf("count rows: %v", err)
 	}
 	return count
+}
+
+// TestAllowedChannels reads the channel_access rows from migration 004; it
+// writes nothing.
+func TestAllowedChannels(t *testing.T) {
+	dsn := os.Getenv("TEST_DATABASE_URL")
+	if dsn == "" {
+		t.Skip("TEST_DATABASE_URL not set, skipping integration test")
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	pool, err := pgxpool.New(ctx, dsn)
+	if err != nil {
+		t.Fatalf("connect to test database: %v", err)
+	}
+	defer pool.Close()
+
+	tests := []struct {
+		user string
+		want []string
+	}{
+		{"lead", []string{"backend", "devops", "frontend", "general", "product"}},
+		{"frontend-dev", []string{"frontend", "general", "product"}},
+		{"guest", []string{"general"}},
+		{"nobody", []string{}},
+	}
+	for _, tt := range tests {
+		got, err := AllowedChannels(ctx, pool, tt.user)
+		if err != nil {
+			t.Fatalf("AllowedChannels(%q): %v", tt.user, err)
+		}
+		if !reflect.DeepEqual(got, tt.want) {
+			t.Errorf("AllowedChannels(%q) = %v, want %v", tt.user, got, tt.want)
+		}
+	}
 }
