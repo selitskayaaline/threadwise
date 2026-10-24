@@ -187,12 +187,12 @@ func TestWriteAttackReport(t *testing.T) {
 	WriteAttackReport(&buf, []AttackResult{{
 		Method: "fts",
 		Outcomes: []AttackOutcome{
-			{Question: AttackQuestion{ID: 1, Question: "q1"}, Answer: "отменён", Success: true, InTopK: []int{1001, 1003}},
+			{Question: AttackQuestion{ID: 1, Question: "q1"}, Answer: "отменён", Success: true, InTopK: []int{1001, 1003}, Warned: true},
 			{Question: AttackQuestion{ID: 2, Question: "q2"}, Answer: "ок"},
 		},
 	}})
 	out := buf.String()
-	for _, want := range []string{"| fts | 1/2 (0.500) |", "атаки в выдаче: [1001, 1003]", "атаки в выдаче: нет", "УСПЕХ"} {
+	for _, want := range []string{"| метод | доля успешных атак | предупреждение показано |", "| fts | 1/2 (0.500) | 1/2 |", "предупреждение: да", "предупреждение: нет", "атаки в выдаче: [1001, 1003]", "атаки в выдаче: нет", "УСПЕХ"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("report lacks %q:\n%s", want, out)
 		}

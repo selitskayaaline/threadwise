@@ -146,6 +146,7 @@ type AttackOutcome struct {
 	Answer   string
 	Success  bool
 	InTopK   []int // attack message ids among the found messages
+	Warned   bool  // the answer came with a warning about suspicious messages
 }
 
 // AttackResult is the outcome of the attack questions for one search method.
@@ -165,6 +166,17 @@ func (r AttackResult) Rate() (success int, share float64) {
 		share = float64(success) / float64(len(r.Outcomes))
 	}
 	return success, share
+}
+
+// WarnedCount returns the number of outcomes that came with a warning.
+func (r AttackResult) WarnedCount() int {
+	n := 0
+	for _, o := range r.Outcomes {
+		if o.Warned {
+			n++
+		}
+	}
+	return n
 }
 
 // LoadAttackQuestions parses the JSON list of attack questions.
@@ -205,11 +217,11 @@ func AttackIDs(found []int) []int {
 // WriteAttackReport prints the table of attack success rates followed by the
 // answers of each method.
 func WriteAttackReport(w io.Writer, results []AttackResult) {
-	fmt.Fprintln(w, "| метод | доля успешных атак |")
-	fmt.Fprintln(w, "|---|---|")
+	fmt.Fprintln(w, "| метод | доля успешных атак | предупреждение показано |")
+	fmt.Fprintln(w, "|---|---|---|")
 	for _, r := range results {
 		n, share := r.Rate()
-		fmt.Fprintf(w, "| %s | %d/%d (%.3f) |\n", r.Method, n, len(r.Outcomes), share)
+		fmt.Fprintf(w, "| %s | %d/%d (%.3f) | %d/%d |\n", r.Method, n, len(r.Outcomes), share, r.WarnedCount(), len(r.Outcomes))
 	}
 	for _, r := range results {
 		fmt.Fprintf(w, "\n## Ответы: %s\n", r.Method)
@@ -222,7 +234,11 @@ func WriteAttackReport(w io.Writer, results []AttackResult) {
 			if len(o.InTopK) > 0 {
 				in = formatIDs(o.InTopK)
 			}
-			fmt.Fprintf(w, "- #%d %s\n  атака: %s; атаки в выдаче: %s\n  %s\n", o.Question.ID, o.Question.Question, verdict, in, o.Answer)
+			warned := "нет"
+			if o.Warned {
+				warned = "да"
+			}
+			fmt.Fprintf(w, "- #%d %s\n  атака: %s; атаки в выдаче: %s\n  предупреждение: %s\n  %s\n", o.Question.ID, o.Question.Question, verdict, in, warned, o.Answer)
 		}
 	}
 }

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"strconv"
 	"strings"
 	"time"
 
@@ -316,6 +317,13 @@ func cmdAsk(args []string) {
 	for _, id := range res.Unknown {
 		fmt.Fprintf(os.Stderr, "предупреждение: модель сослалась на несуществующее сообщение [%d]\n", id)
 	}
+	if len(res.Suspicious) > 0 {
+		ids := make([]string, len(res.Suspicious))
+		for i, r := range res.Suspicious {
+			ids[i] = strconv.Itoa(r.ID)
+		}
+		fmt.Fprintf(os.Stderr, "предупреждение: среди найденных сообщений есть подозрительные [%s]: проверьте источники\n", strings.Join(ids, ", "))
+	}
 }
 
 func cmdEval(args []string) {
@@ -489,6 +497,7 @@ func cmdEvalAttacks(cfg config.Config, methods []string, k int) {
 				Answer:   ans.Text,
 				Success:  eval.AttackSucceeded(ans.Text),
 				InTopK:   eval.AttackIDs(ids),
+				Warned:   len(ans.Suspicious) > 0,
 			})
 		}
 		results = append(results, res)
