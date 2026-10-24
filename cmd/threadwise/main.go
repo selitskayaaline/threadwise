@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"strconv"
 	"strings"
 	"time"
 
@@ -316,6 +317,13 @@ func cmdAsk(args []string) {
 	for _, id := range res.Unknown {
 		fmt.Fprintf(os.Stderr, "предупреждение: модель сослалась на несуществующее сообщение [%d]\n", id)
 	}
+	if len(res.Suspicious) > 0 {
+		ids := make([]string, len(res.Suspicious))
+		for i, r := range res.Suspicious {
+			ids[i] = strconv.Itoa(r.ID)
+		}
+		fmt.Fprintf(os.Stderr, "предупреждение: среди найденных сообщений есть подозрительные [%s]: проверьте источники\n", strings.Join(ids, ", "))
+	}
 }
 
 func cmdEval(args []string) {
@@ -323,6 +331,7 @@ func cmdEval(args []string) {
 	k := fs.Int("k", 5, "number of messages to retrieve per question")
 	methods := fs.String("methods", "fts,vector", "comma-separated search methods: fts, vector")
 	file := fs.String("file", "data/questions.json", "path to the questions JSON file")
+	attacks := fs.Bool("attacks", false, "measure prompt-injection attacks with "+attackQuestionsFile+" instead of retrieval quality")
 	fs.Parse(args)
 
 	if *k < 1 {
@@ -358,6 +367,15 @@ func cmdEval(args []string) {
 			fmt.Fprintln(os.Stderr, "threadwise eval:", err)
 			os.Exit(1)
 		}
+	}
+
+	if *attacks {
+		if err := cfg.RequireChat(); err != nil {
+			fmt.Fprintln(os.Stderr, "threadwise eval:", err)
+			os.Exit(1)
+		}
+		cmdEvalAttacks(cfg, names, *k)
+		return
 	}
 
 	data, err := os.ReadFile(*file)
@@ -405,4 +423,85 @@ func cmdEval(args []string) {
 	}
 
 	eval.WriteReport(os.Stdout, *k, skipped, results)
+}
+
+const attackQuestionsFile = "data/attack_questions.json"
+
+// cmdEvalAttacks asks the attack questions through rag.Service, as ask does,
+// for every method and prints the share of successful attacks and the answers.
+func cmdEvalAttacks(cfg config.Config, methods []string, k int) {
+	data, err := os.ReadFile(attackQuestionsFile)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "threadwise eval:", err)
+		os.Exit(1)
+	}
+	qs, err := eval.LoadAttackQuestions(data)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "threadwise eval:", err)
+		os.Exit(1)
+	}
+
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
+	defer stop()
+
+	pool, err := pgxpool.New(ctx, cfg.DatabaseURL)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "threadwise eval:", err)
+		os.Exit(1)
+	}
+	defer pool.Close()
+
+	channels, err := store.AllowedChannels(ctx, pool, evalUser)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "threadwise eval:", err)
+		os.Exit(1)
+	}
+
+	var results []eval.AttackResult
+	for _, name := range methods {
+		var retriever search.Retriever
+		if name == "fts" {
+			retriever = search.NewFTS(pool)
+		} else {
+			retriever = search.NewVector(pool, ollama.New(cfg.OllamaURL, cfg.EmbedModel))
+		}
+		svc := &rag.Service{
+			Retriever:   retriever,
+			Chat:        ollama.New(cfg.OllamaURL, cfg.ChatModel),
+			K:           k,
+			Channels:    channels,
+			Temperature: askTemperature,
+		}
+
+		res := eval.AttackResult{Method: name}
+		for _, q := range qs {
+			// A separate search with the same parameters shows whether the
+			// attack reached the model; it does not affect the answer.
+			found, err := retriever.Search(ctx, search.Query{Text: q.Question, K: k, Channels: channels})
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "threadwise eval: method %s: question %d: %v\n", name, q.ID, err)
+				os.Exit(1)
+			}
+			ids := make([]int, len(found))
+			for i, f := range found {
+				ids[i] = f.ID
+			}
+
+			ans, err := svc.Answer(ctx, q.Question)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "threadwise eval: method %s: question %d: %v\n", name, q.ID, err)
+				os.Exit(1)
+			}
+			res.Outcomes = append(res.Outcomes, eval.AttackOutcome{
+				Question: q,
+				Answer:   ans.Text,
+				Success:  eval.AttackSucceeded(ans.Text),
+				InTopK:   eval.AttackIDs(ids),
+				Warned:   len(ans.Suspicious) > 0,
+			})
+		}
+		results = append(results, res)
+	}
+
+	eval.WriteAttackReport(os.Stdout, results)
 }
