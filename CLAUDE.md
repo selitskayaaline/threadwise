@@ -19,11 +19,11 @@ Go service for RAG (retrieval-augmented generation) search over chat messages.
 - `internal/store` — Postgres access: message upsert, embedding read/write, `AllowedChannels` (channels a user may search, from `channel_access`)
 - `internal/ollama` — Ollama HTTP client (`Embed`, `Chat`); retries on network errors and 5xx; `Chat` has a longer timeout
 - `internal/search` — `Retriever` and `Embedder` interfaces; `Vector` implementation (embed query, nearest messages by pgvector cosine distance); `FTS` implementation (full-text search by words, Russian config, query words combined with OR, ranked by `ts_rank`)
-- `internal/rag` — `BuildPrompt` (system prompt from `docs/prompt.md`, messages sorted by time inside `<messages>`), `ParseCitations`, `Service.Answer` (search → prompt → chat → citation check)
+- `internal/rag` — `BuildPrompt` (system prompt constant `systemPrompt`, messages sorted by time inside `<messages>`; `escapeDelimiters` turns `<messages>` / `</messages>` tags in message text into `[messages]` / `[/messages]`; messages matching `isSuspicious` get a `[подозрительное]` mark before the text), `isSuspicious` (case-insensitive match against the `suspiciousPhrases` list of command-like phrases), `ParseCitations`, `Service.Answer` (search → prompt → chat → citation check; `Result.Suspicious` lists all found suspicious messages, cited or not, and survives a refusal)
 - `internal/eval` — question loading, hit@k / MRR metrics (pure function), Markdown report
 - `migrations/` — SQL migrations (`003_fts.sql` adds the `tsv` column and index for full-text search; `004_channel_access.sql` adds the `channel_access` table with test users `lead`, `frontend-dev`, `guest`)
-- `data/` — `messages.json` (synthetic chat messages), `questions.json` (test questions)
-- `docs/` — documentation; `prompt.md` is the system prompt for `ask` (kept in sync with `internal/rag` by a test)
+- `data/` — `messages.json` (synthetic chat messages), `questions.json` (test questions), `attacks.json` (5 injection test messages, ids 1001–1005), `attack_questions.json` (3 questions for them)
+- `docs/` — documentation; `prompt.md` is a copy of the `systemPrompt` constant in `internal/rag`, a test checks they match, so change both when changing the rules; `security.md` (prompt injection measurements and defenses), `attacks-*.md` (raw results of the measurements)
 
 ## Commands
 
@@ -33,8 +33,8 @@ Go service for RAG (retrieval-augmented generation) search over chat messages.
 - `make eval` — compare search methods on `data/questions.json` (hit@k, MRR@k, misses)
 - `make test-db` — apply all `migrations/*.sql` to the `threadwise_test` database
 - `threadwise search [-k N] [-method vector|fts] [-user NAME] "question"` — print the N best messages from the channels of the user (default 5, method `vector`, user `lead`); an unknown user gets no results; flags go before the question
-- `threadwise ask [-k N] [-method vector|fts] [-user NAME] "question"` — answer from the found messages of the user's channels (default user `lead`) with `[id]` citations, then print `Источники:` (only cited messages); warns about citations of messages that were not found; temperature 0.1; needs `CHAT_MODEL`; flags go before the question
-- `threadwise eval [-k N] [-methods fts,vector] [-file path]` — runs as `lead`; questions without `gold_ids` are skipped; Ollama is required only if `vector` is among the methods
+- `threadwise ask [-k N] [-method vector|fts] [-user NAME] "question"` — answer from the found messages of the user's channels (default user `lead`) with `[id]` citations, then print `Источники:` (only cited messages); warns about citations of messages that were not found; temperature 0.1; needs `CHAT_MODEL`; warns on stderr when the found messages are suspicious; flags go before the question
+- `threadwise eval [-k N] [-methods fts,vector] [-file path] [-attacks]` — runs as `lead`; questions without `gold_ids` are skipped; Ollama is required only if `vector` is among the methods. `-attacks` asks the questions from `data/attack_questions.json` via `rag.Service` (like `ask`, needs `CHAT_MODEL`, ignores `-file`) for each method and prints the share of successful attacks and whether the suspicious-message warning was shown. Before a measurement load the attacks: `threadwise load -file data/attacks.json`, then `make embed`. After a measurement always remove them: `delete from messages where id >= 1000` (otherwise the numbers of the plain `eval` change)
 
 ## Conventions
 
@@ -43,6 +43,7 @@ Go service for RAG (retrieval-augmented generation) search over chat messages.
 - Parameterized SQL only, never string-concatenated queries
 - Integration tests use only the `threadwise_test` database and delete only their own rows
 - Conventional Commits for commit messages
+- Before changing `internal/rag` or `docs/prompt.md`, read `docs/security.md`; after the changes run `eval -attacks` and compare with `docs/security.md`
 
 ## Key decisions
 
