@@ -46,7 +46,7 @@ func BuildPrompt(question string, results []search.Result) []ollama.Message {
 	var b strings.Builder
 	b.WriteString("<messages>\n")
 	for _, r := range sorted {
-		fmt.Fprintf(&b, "[%d] #%s · %s · %s: %s\n", r.ID, r.Channel, r.Author, FormatTime(r), r.Text)
+		fmt.Fprintf(&b, "[%d] #%s · %s · %s: %s\n", r.ID, r.Channel, r.Author, FormatTime(r), escapeDelimiters(r.Text))
 	}
 	b.WriteString("</messages>\n\nВопрос: ")
 	b.WriteString(question)
@@ -55,6 +55,15 @@ func BuildPrompt(question string, results []search.Result) []ollama.Message {
 		{Role: "system", Content: systemPrompt},
 		{Role: "user", Content: b.String()},
 	}
+}
+
+var delimiterRe = regexp.MustCompile(`(?i)<\s*(/?)\s*messages\s*>`)
+
+// escapeDelimiters turns the <messages> and </messages> tags of the prompt into
+// [messages] and [/messages], in any case and with spaces inside the tag, so
+// that message text cannot close or reopen the block.
+func escapeDelimiters(s string) string {
+	return delimiterRe.ReplaceAllString(s, "[${1}messages]")
 }
 
 // FormatTime renders the message time as "2006-01-02 15:04" in UTC.
